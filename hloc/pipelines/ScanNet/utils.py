@@ -1,8 +1,10 @@
 import logging
 
 import numpy as np
+import os
 
-from hloc.utils.read_write_model import read_model, write_model
+from hloc.utils.read_write_model import (read_model, write_model, Camera, Image, Point3D,
+                                         rotmat2qvec)
 
 logger = logging.getLogger(__name__)
 
@@ -34,15 +36,45 @@ def create_reference_sfm(full_model, ref_model, blacklist=None, ext=".bin"):
     logger.info(f"Kept {len(images_ref)} images out of {len(images)}.")
 
 
-def create_reference_sfm_from_ScanNetDatset(data_path, ref_model, ext=""):
+def create_reference_sfm_from_ScanNetDatset(data_path, ref_model, scene, ext=".bin"):
     '''
     Create a new COLMAP model with known camera poses and intrinsics,
     without any points3D as well as 2D points.
     '''
+    data_path = data_path / scene
     ref_model.mkdir(exist_ok=True)
-    camera = dict()
+    cameras = dict()
     images = dict()
     points3D = dict()
+    img_color_path = data_path / "color"
+    intrinsic_path = data_path / "intrinsic"
+    pose_path = data_path / "pose"
+    file_list = os.listdir(img_color_path)
+    
+    # read camera intrinsics
+    with open(intrinsic_path / "intrinsic_color.txt", "r") as f:
+        intrinsic = f.read().rstrip().split("\n")
+        intrinsic = [list(map(float, x.split())) for x in intrinsic]
+        intrinsic = np.array(intrinsic)
+    cameras[0] = Camera(
+                    id=0, model="PINHOLE", width=1296, height=968, params=np.array((intrinsic[0,0], 
+                                                                                   intrinsic[1,1], intrinsic[0,2], intrinsic[1,2]))
+                )
+    for file in file_list:
+        image_id = int(file.split(".")[0])
+        tmp_path = pose_path / f"{image_id}.txt"
+        with open(tmp_path, "r") as f:
+            pose = f.read().rstrip().split("\n")
+            pose = [list(map(float, x.split())) for x in pose]
+            pose = np.array(pose)
+        pose = np.linalg.inv(pose)
+        t = pose[:3, 3]
+        R = pose[:3, :3]
+        q = rotmat2qvec(R)
+        images[image_id] = Image(
+            id=image_id, qvec=q, tvec=t, camera_id=0, name=file, xys=[], point3D_ids=[]
+        )
+    write_model(cameras, images, points3D, ref_model, ".bin")
     
 
 if __name__ == "__main__":
@@ -51,11 +83,11 @@ if __name__ == "__main__":
     from pathlib import Path
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_path", type=Path, default="/media/thuan/8tb/ScanNet/", help="Path to the dataset.")
-    parser.add_argument("--ref_model", type=Path, help="Path to the reference model.")
+    parser.add_argument("--data_path", type=Path, default="/media/thuan/8tb/ScanNet/", 
+                        help="Path to the dataset.")
+    parser.add_argument("--ref_model", type=Path,default="/home/thuan/Dropbox/TRANSFERS" , 
+                        help="Path to the reference model.")
     parser.add_argument("--scene", type=str,default="scene0000_00", help="Scene name.")
-
+    
     args = parser.parse_args()
-
-    logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-    create_reference_sfm(args.full_model, args.ref_model, args.blacklist, args.ext)
+    create_reference_sfm_from_ScanNetDatset(args.data_path, args.ref_model, args.scene)
