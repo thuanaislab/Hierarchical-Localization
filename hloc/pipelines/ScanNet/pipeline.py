@@ -7,13 +7,14 @@ from ... import (
     logger,
     match_features,
     pairs_from_covisibility,
+    pairs_from_poses,
     triangulation,
 )
 from ..Cambridge.utils import create_query_list_with_intrinsics, evaluate
 from .create_gt_sfm import correct_sfm_with_gt_depth
-from .utils import create_reference_sfm
+from .utils import create_reference_sfm, create_reference_sfm_from_ScanNetDatset
 
-SCENES = ["scene0000_00"]
+SCENES = ["scene0120_01"]
 
 
 def run_scene(
@@ -27,7 +28,7 @@ def run_scene(
     depth_dir=None,
 ):
     outputs.mkdir(exist_ok=True, parents=True)
-    ref_sfm_sift = outputs / "sfm_sift"
+    ref_sfm_gt_pose = outputs / "sfm_gt_pose"
     ref_sfm = outputs / "sfm_superpoint+superglue"
     query_list = outputs / "query_list_with_intrinsics.txt"
 
@@ -36,31 +37,34 @@ def run_scene(
         "model": {
             "name": "superpoint",
             "nms_radius": 3,
-            "max_keypoints": 4096,
+            "max_keypoints": 2048,
+            'keypoint_threshold': 0.0, #0.005,
         },
         "preprocessing": {
-            "globs": ["*.color.png"],
+            "globs": ["*.jpg"],
             "grayscale": True,
-            "resize_max": 1024,
+            "resize_max": 640,
         },
     }
-    matcher_conf = match_features.confs["superglue"]
-    matcher_conf["model"]["sinkhorn_iterations"] = 5
+    matcher_conf = match_features.confs["superpoint+lightglue"]
+    # matcher_conf["model"]["sinkhorn_iterations"] = 5
 
-    test_list = gt_dir / "list_test.txt"
-    create_reference_sfm(gt_dir, ref_sfm_sift, test_list)
-    create_query_list_with_intrinsics(gt_dir, query_list, test_list)
+    # test_list = gt_dir / "list_test.txt"
+    # create_reference_sfm(gt_dir, ref_sfm_gt_pose, test_list)
+    create_reference_sfm_from_ScanNetDatset(gt_dir, ref_sfm_gt_pose, "scene0000_00")
+    # create_query_list_with_intrinsics(gt_dir, query_list, test_list)
 
     features = extract_features.main(feature_conf, images, outputs, as_half=True)
 
     sfm_pairs = outputs / f"pairs-db-covis{num_covis}.txt"
-    pairs_from_covisibility.main(ref_sfm_sift, sfm_pairs, num_matched=num_covis)
+    # pairs_from_covisibility.main(ref_sfm_gt_pose, sfm_pairs, num_matched=num_covis)
+    pairs_from_poses.main(ref_sfm_gt_pose, sfm_pairs, num_matched=num_covis)
     sfm_matches = match_features.main(
         matcher_conf, sfm_pairs, feature_conf["output"], outputs
     )
     if not (use_dense_depth and ref_sfm.exists()):
         triangulation.main(
-            ref_sfm, ref_sfm_sift, images, sfm_pairs, features, sfm_matches
+            ref_sfm, ref_sfm_gt_pose, images, sfm_pairs, features, sfm_matches
         )
     if use_dense_depth:
         assert depth_dir is not None
@@ -68,6 +72,7 @@ def run_scene(
         correct_sfm_with_gt_depth(ref_sfm, depth_dir, ref_sfm_fix)
         ref_sfm = ref_sfm_fix
 
+    '''
     loc_matches = match_features.main(
         matcher_conf, retrieval, feature_conf["output"], outputs
     )
@@ -82,7 +87,7 @@ def run_scene(
         covisibility_clustering=False,
         prepend_camera_name=True,
     )
-
+    '''
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -97,7 +102,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--outputs",
         type=Path,
-        default="outputs/ScanNet",
+        default="/media/thuan/8tb/ScanNet_HlocOutut",
         help="Path to the output directory, default: %(default)s",
     )
     parser.add_argument("--use_dense_depth", action="store_true")
@@ -109,7 +114,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    gt_dirs = args.dataset / "7scenes_sfm_triangulated/{scene}/triangulated"
+    gt_dirs = args.dataset / "{scene}/"
     retrieval_dirs = args.dataset / "7scenes_densevlad_retrieval_top_10"
 
     all_results = {}
@@ -122,18 +127,19 @@ if __name__ == "__main__":
         )
         if args.overwrite or not results.exists():
             run_scene(
-                args.dataset / scene,
+                args.dataset / f"{scene}/color",
                 Path(str(gt_dirs).format(scene=scene)),
                 retrieval_dirs / f"{scene}_top10.txt",
                 args.outputs / scene,
                 results,
                 args.num_covis,
                 args.use_dense_depth,
-                depth_dir=args.dataset / f"depth/7scenes_{scene}/train/depth",
+                depth_dir=args.dataset / f"{scene}/depth",
             )
         all_results[scene] = results
-
+    '''
     for scene in args.scenes:
         logger.info(f'Evaluate scene "{scene}".')
         gt_dir = Path(str(gt_dirs).format(scene=scene))
         evaluate(gt_dir, all_results[scene], gt_dir / "list_test.txt")
+    '''
