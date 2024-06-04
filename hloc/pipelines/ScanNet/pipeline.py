@@ -43,7 +43,7 @@ def run_scene(
         "preprocessing": {
             "globs": ["*.jpg"],
             "grayscale": True,
-            "resize_max": 640,
+            "resize_max": 1024,
         },
     }
     matcher_conf = match_features.confs["superpoint+lightglue"]
